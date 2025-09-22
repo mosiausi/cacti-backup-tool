@@ -3,65 +3,67 @@
 # Cacti Silent Backup Script for Cron
 # Author: Moshiko Nayman
 # ===============================================
-
 set -euo pipefail
-DATE=$(date +%F)
+
+# ===== CONFIG =====
 BACKUP_ROOT="/home/pi/cacti-backup"
-ARCHIVE_DIR="$BACKUP_ROOT/cacti-archive"
-LOG_FILE="$BACKUP_ROOT/backup-$DATE.log"
+BACKUP_ARCHIVE_DIR="$BACKUP_ROOT/cacti-archive"
 RRA_DIR="/var/lib/cacti/rra"
-WEB_DIR="/usr/share/cacti"
 MYSQL_USER="root"
 MYSQL_PASSWORD="PASSWORDHERE"
 DB_NAME="cacti"
+LOG_FILE="$BACKUP_ROOT/backup-$(date +%F).log"
+KEEP_LOG_DAYS=14
+KEEP_BACKUP_DAYS=14
 
-mkdir -p "$ARCHIVE_DIR"
+mkdir -p "$BACKUP_ARCHIVE_DIR"
 
-echo "[$(date)] Starting Cacti backup..." | tee -a "$LOG_FILE"
+# ===== Logging =====
+exec > >(tee -a "$LOG_FILE") 2>&1
+echo "===== Backup started at $(date) ====="
 
-# --- 1️⃣ Backup MySQL Database ---
-echo "[$(date)] Backing up MySQL database..." | tee -a "$LOG_FILE"
-mysqldump --user="$MYSQL_USER" --password="$MYSQL_PASSWORD" --add-drop-table --databases "$DB_NAME" \
-    > "$BACKUP_ROOT/cactidb_backup-$DATE.sql"
-echo "✅ Database backup complete" | tee -a "$LOG_FILE"
+# ===== Stop cron for safe RRD export =====
+echo "Stopping cron for RRD export..."
+sudo systemctl stop cron || true
 
-# --- 2️⃣ Backup Cacti Web Files and Config ---
-echo "[$(date)] Backing up Cacti web files..." | tee -a "$LOG_FILE"
-cp -a "$WEB_DIR" "$BACKUP_ROOT/cacti_backup-$DATE"
-echo "✅ Web files backup complete" | tee -a "$LOG_FILE"
+# ===== Backup MySQL Database =====
+echo "Backing up MySQL database..."
+mysqldump --user="$MYSQL_USER" --password="$MYSQL_PASSWORD" --add-drop-table "$DB_NAME" > "$BACKUP_ROOT/cactidb_backup-$(date +%F).sql"
 
-# --- 3️⃣ Backup RRDs safely ---
-echo "[$(date)] Stopping cron to safely export RRDs..." | tee -a "$LOG_FILE"
-sudo systemctl stop cron
+# ===== Backup Cacti files & configs =====
+echo "Backing up Cacti web and config directories..."
+cp -a /usr/share/cacti "$BACKUP_ROOT/cacti_backup-$(date +%F)"
+cp -a /etc/cacti "$BACKUP_ROOT/cacti_config-$(date +%F)"
 
-echo "[$(date)] Copying RRDs..." | tee -a "$LOG_FILE"
-mkdir -p "$BACKUP_ROOT/cacti_rra-$DATE"
-cp -a "$RRA_DIR"/*.rrd "$BACKUP_ROOT/cacti_rra-$DATE/"
+# ===== Backup and Export RRDs =====
+echo "Backing up RRD files..."
+mkdir -p "$BACKUP_ROOT/cacti_rra"
+cp -a "$RRA_DIR/"*.rrd "$BACKUP_ROOT/cacti_rra"
 
-echo "[$(date)] Converting RRDs to XML..." | tee -a "$LOG_FILE"
-for rrd in "$BACKUP_ROOT/cacti_rra-$DATE"/*.rrd; do
-    rrdtool dump "$rrd" > "$rrd.xml"
+echo "Converting RRDs to XML..."
+for i in "$BACKUP_ROOT"/cacti_rra/*.rrd; do
+    rrdtool dump "$i" > "$i.xml"
 done
 
-echo "[$(date)] Restarting cron..." | tee -a "$LOG_FILE"
-sudo systemctl start cron
-echo "✅ RRD export complete" | tee -a "$LOG_FILE"
+# ===== Restart cron =====
+echo "Restarting cron..."
+sudo systemctl start cron || true
 
-# --- 4️⃣ Create compressed archive ---
-echo "[$(date)] Creating compressed archive..." | tee -a "$LOG_FILE"
-tar -czf "$ARCHIVE_DIR/cacti-backup-$DATE.tar.gz" \
-    -C "$BACKUP_ROOT" \
-    "cacti_backup-$DATE" "cactidb_backup-$DATE.sql" "cacti_rra-$DATE"
-echo "✅ Archive created at $ARCHIVE_DIR/cacti-backup-$DATE.tar.gz" | tee -a "$LOG_FILE"
+# ===== Create compressed archive =====
+ARCHIVE_NAME="cacti-prod-$(date +%F).tar.gz"
+echo "Creating archive $ARCHIVE_NAME..."
+tar -czf "$BACKUP_ARCHIVE_DIR/$ARCHIVE_NAME" -C "$BACKUP_ROOT" cacti_backup* cacti_config* cactidb_backup* cacti_rra*
 
-# --- 5️⃣ Cleanup old backups ---
-echo "[$(date)] Cleaning up backups older than 14 days..." | tee -a "$LOG_FILE"
-find "$ARCHIVE_DIR" -name "cacti-backup-*.tar.gz" -mtime +14 -exec rm {} \;
-echo "✅ Cleanup complete" | tee -a "$LOG_FILE"
+# ===== Cleanup temporary backup folders =====
+echo "Cleaning temporary backup folders..."
+rm -rf "$BACKUP_ROOT"/cacti_backup* "$BACKUP_ROOT"/cacti_config* "$BACKUP_ROOT"/cactidb_backup* "$BACKUP_ROOT"/cacti_rra*
 
-# --- 6️⃣ Remove temporary backup folders ---
-rm -rf "$BACKUP_ROOT/cacti_backup-$DATE" \
-       "$BACKUP_ROOT/cactidb_backup-$DATE.sql" \
-       "$BACKUP_ROOT/cacti_rra-$DATE"
+# ===== Cleanup old logs =====
+echo "Removing logs older than $KEEP_LOG_DAYS days..."
+find "$BACKUP_ROOT" -name "backup-*.log" -mtime +"$KEEP_LOG_DAYS" -exec rm {} \;
 
-echo "[$(date)] Cacti backup finished successfully!" | tee -a "$LOG_FILE"
+# ===== Cleanup old backups =====
+echo "Removing backups older than $KEEP_BACKUP_DAYS days..."
+find "$BACKUP_ARCHIVE_DIR" -name "cacti-prod-*.tar.gz" -mtime +"$KEEP_BACKUP_DAYS" -exec rm {} \;
+
+echo "===== Backup completed at $(date) ====="
