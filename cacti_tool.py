@@ -13,7 +13,7 @@ BACKUP_ROOT = "/opt"
 BACKUP_FOLDER = "cacti_backup"
 BACKUP_DIR = os.path.join(BACKUP_ROOT, BACKUP_FOLDER)
 MYSQL_USER = "root"
-MYSQL_PASSWORD = "red555"
+MYSQL_PASSWORD = "PASSWORDHERE"
 DB_NAME = "cacti"
 RRA_DIR = "/var/lib/cacti/rra"   # adjust if your RRAs live elsewhere
 
