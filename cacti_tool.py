@@ -11,7 +11,7 @@ import datetime
 # ====== CONFIG ======
 BACKUP_ROOT = os.path.join(os.getcwd(), "cacti_manual_backups")
 MYSQL_USER = "root"
-MYSQL_PASSWORD = "red555"
+MYSQL_PASSWORD = "PASSWORDHERE"
 DB_NAME = "cacti"
 # ====================
 
