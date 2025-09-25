@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# Cacti Backup & Restore Tool (Number Menu + Compression + Fixed Restore)
+# Cacti Backup & Restore Tool (Number Menu + Compression + Fixed Restore + XML cleanup)
 # Author: Moshiko Nayman (modified)
 
 import os
@@ -11,8 +11,9 @@ import datetime
 # ====== CONFIG ======
 BACKUP_ROOT = os.path.join(os.getcwd(), "cacti_manual_backups")
 MYSQL_USER = "root"
-MYSQL_PASSWORD = "PASSWORDHERE"
+MYSQL_PASSWORD = "PASSWORD"
 DB_NAME = "cacti"
+RRA_DIR = "/usr/share/cacti/site/rra"
 # ====================
 
 
@@ -128,7 +129,20 @@ def restore():
         print("❌ No backups found.")
         return
 
-    choice = menu("Select a backup folder/archive to restore:", backups + ["Cancel"])
+    # Add human-readable timestamps
+    display_backups = []
+    for b in backups:
+        label = b
+        try:
+            # Match YYYYMMDD_HHMMSS
+            ts = b.split("_")[0] + "_" + b.split("_")[1]
+            dt = datetime.datetime.strptime(ts, "%Y%m%d_%H%M%S")
+            label = f"{b} ({dt.strftime('%Y-%m-%d %H:%M:%S')})"
+        except Exception:
+            pass
+        display_backups.append(label)
+
+    choice = menu("Select a backup folder/archive to restore:", display_backups + ["Cancel"])
     if choice == len(backups) + 1:
         print("❌ Restore cancelled.")
         return
@@ -180,6 +194,16 @@ def restore():
         with open(sql_file, "r") as f:
             subprocess.run(["mysql", "-u", MYSQL_USER, f"-p{MYSQL_PASSWORD}", DB_NAME], stdin=f)
         print("✅ Database restored")
+
+    # Cleanup *.xml from RRA dir
+    if os.path.exists(RRA_DIR):
+        for f in os.listdir(RRA_DIR):
+            if f.endswith(".xml"):
+                try:
+                    os.remove(os.path.join(RRA_DIR, f))
+                    print(f"🧹 Removed leftover XML: {f}")
+                except Exception as e:
+                    print(f"⚠️ Could not remove {f}: {e}")
 
     print("▶️ Restarting cron jobs...")
     subprocess.run(["systemctl", "start", "cron"], check=False)
